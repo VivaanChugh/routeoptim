@@ -115,10 +115,10 @@ export const useStore = create<AppStore>((set, get) => ({
         isOptimizing: false,
         error: null,
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       set({
         isOptimizing: false,
-        error: error.message || 'Optimization failed',
+        error: error instanceof Error ? error.message : 'Optimization failed',
       });
     }
   },
@@ -142,8 +142,8 @@ export const useStore = create<AppStore>((set, get) => ({
         selectedScenario: scenarioKey,
         error: null,
       });
-    } catch (error: any) {
-      set({ error: error.message || 'Failed to load scenario' });
+    } catch (error: unknown) {
+      set({ error: error instanceof Error ? error.message : 'Failed to load scenario' });
     }
   },
 

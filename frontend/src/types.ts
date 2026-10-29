@@ -99,7 +99,7 @@ export interface RouteOptimizationResponse {
   warnings: string[];
   computation_time_seconds: number;
   timing_breakdown?: Record<string, number>;
-  metadata: Record<string, any>;
+  metadata: Record<string, unknown>;
 }
 
 export interface SampleScenario {
