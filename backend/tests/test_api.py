@@ -81,7 +81,7 @@ def test_optimize_route_insufficient_stops():
         ],
     }
     response = client.post("/api/v1/optimize", json=request_data)
-    assert response.status_code == 400  # At least 2 stops required
+    assert response.status_code == 422  # Request validation: at least 2 stops required
 
 
 @pytest.mark.asyncio
