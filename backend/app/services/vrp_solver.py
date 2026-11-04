@@ -71,10 +71,11 @@ class VRPSolver:
         """Create callback for travel time."""
 
         def time_callback(from_index: int, to_index: int) -> int:
-            """Return travel time between two nodes."""
+            """Return service time at origin plus travel time to destination (seconds)."""
             from_node = manager.IndexToNode(from_index)
             to_node = manager.IndexToNode(to_index)
-            return int(time_matrix[from_node][to_node])
+            service_seconds = self.service_times[from_node] * 60
+            return int(time_matrix[from_node][to_node]) + service_seconds
 
         return time_callback
 
@@ -143,14 +144,6 @@ class VRPSolver:
                 time_dimension.CumulVar(index).SetRange(
                     earliest * 60, latest * 60  # convert to seconds
                 )
-
-        # Add service time constraints
-        for location_idx in range(self.num_locations):
-            index = self.manager.NodeToIndex(location_idx)
-            service_time_seconds = self.service_times[location_idx] * 60
-            time_dimension.SetCumulVarSoftUpperBound(
-                index, service_time_seconds, 100000
-            )
 
         # Add capacity constraints if enabled
         if self.options.use_capacity_constraints and max(self.demands) > 0:
