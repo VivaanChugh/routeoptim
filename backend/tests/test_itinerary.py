@@ -27,22 +27,27 @@ def _request(use_time_windows: bool = False) -> RouteOptimizationRequest:
     )
 
 
-def _build(request: RouteOptimizationRequest, times):
+# Leg travel times in seconds: depot->A 10 min, A->B 15 min, B->depot 10 min.
+TIME_MATRIX = [[0, 600, 1500], [600, 0, 900], [600, 900, 0]]
+
+
+def _build(request: RouteOptimizationRequest):
     coords = [(request.depot.lat, request.depot.lng)] + [
         (s.lat, s.lng) for s in request.stops
     ]
     return _service()._build_itinerary(
         node_indices=[0, 1, 2, 0],
-        node_times=times,
+        node_times=[],
         node_distances=[0, 1000, 2000, 3000],
         request=request,
         coordinates=coords,
+        time_matrix=TIME_MATRIX,
     )
 
 
 def test_service_time_accumulates_across_stops():
     """Each stop's arrival must include service time spent at earlier stops."""
-    itinerary = _build(_request(), [0, 600, 1500, 2100])
+    itinerary = _build(_request())
 
     assert [s.arrival_time for s in itinerary] == ["09:00", "09:10", "09:35", "09:50"]
     assert [s.departure_time for s in itinerary] == ["09:00", "09:20", "09:40", "09:50"]
@@ -50,13 +55,13 @@ def test_service_time_accumulates_across_stops():
 
 
 def test_sequence_and_ids_follow_route_order():
-    itinerary = _build(_request(), [0, 600, 1500, 2100])
+    itinerary = _build(_request())
 
     assert [s.sequence for s in itinerary] == [0, 1, 2, 3]
     assert [s.stop_id for s in itinerary] == ["depot", "a", "b", "depot"]
 
 
 def test_cumulative_distance_is_reported_in_km():
-    itinerary = _build(_request(), [0, 600, 1500, 2100])
+    itinerary = _build(_request())
 
     assert [s.cumulative_distance_km for s in itinerary] == [0, 1, 2, 3]

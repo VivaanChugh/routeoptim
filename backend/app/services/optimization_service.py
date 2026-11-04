@@ -83,6 +83,7 @@ class OptimizationService:
                 vrp_solution=vrp_solution,
                 request=request,
                 coordinates=coordinates,
+                time_matrix=time_matrix,
             )
             timing_breakdown["geometry_fetch"] = time.time() - timing_start
 
@@ -174,6 +175,7 @@ class OptimizationService:
         vrp_solution: Dict[str, Any],
         request: RouteOptimizationRequest,
         coordinates: List[Tuple[float, float]],
+        time_matrix: List[List[float]],
     ) -> List[OptimizedRoute]:
         """
         Build OptimizedRoute objects with geometries and itineraries.
@@ -220,6 +222,7 @@ class OptimizationService:
                 node_distances=node_distances,
                 request=request,
                 coordinates=coordinates,
+                time_matrix=time_matrix,
             )
 
             # Calculate total service time for this route
@@ -232,8 +235,11 @@ class OptimizationService:
             # Calculate total waiting time from itinerary
             total_waiting_time_minutes = sum(stop.waiting_time_minutes for stop in itinerary)
             
-            # Calculate driving time (total time from OR-Tools is driving time only)
-            driving_time_minutes = route_data["total_time_seconds"] / 60
+            # Driving time = sum of leg travel times. (OR-Tools' final cumulative
+            # time already includes waiting, so it can't be used here.)
+            driving_time_minutes = sum(
+                time_matrix[a][b] for a, b in zip(node_indices, node_indices[1:])
+            ) / 60
             
             # Total time for route = driving + service + waiting
             total_time_minutes = driving_time_minutes + total_service_time_minutes + total_waiting_time_minutes
@@ -266,21 +272,25 @@ class OptimizationService:
     def _build_itinerary(
         self,
         node_indices: List[int],
-        node_times: List[float],  # cumulative seconds from OR-Tools (includes driving + waiting)
+        node_times: List[float],  # cumulative seconds from OR-Tools (unused for timing)
         node_distances: List[float],  # cumulative meters
         request: RouteOptimizationRequest,
         coordinates: List[Tuple[float, float]],
+        time_matrix: List[List[float]],
     ) -> List[StopItinerary]:
-        """Build stop-by-stop itinerary with proper service time accumulation."""
+        """Build itinerary by simulating the route.
+
+        arrival = previous departure + leg travel time
+        service start = max(arrival, time window opening)
+        departure = service start + service time
+        """
         itinerary = []
         start_time = datetime.strptime(request.vehicles.start_time, "%H:%M")
-        
-        # Track cumulative service time as we go through stops
-        cumulative_service_minutes = 0
 
-        for seq, (node_idx, cum_time, cum_distance) in enumerate(
-            zip(node_indices, node_times, node_distances)
-        ):
+        current_time = start_time  # departure time of the previous node
+        prev_node = node_indices[0]
+
+        for seq, (node_idx, cum_distance) in enumerate(zip(node_indices, node_distances)):
             # Get stop details
             if node_idx == 0:
                 # Depot
@@ -296,27 +306,28 @@ class OptimizationService:
                 # Extract time window from nested object
                 time_window_start = stop.time_window.earliest if stop.time_window else None
 
-            # Arrival time = start + OR-Tools cumulative time + cumulative service time
-            # OR-Tools time includes driving + any waiting for time windows
-            arrival_time = start_time + timedelta(seconds=cum_time) + timedelta(minutes=cumulative_service_minutes)
-            
-            # Check if there's waiting time by comparing to time window
+            # Arrival = previous departure + travel time on this leg
+            if seq == 0:
+                arrival_time = current_time
+            else:
+                arrival_time = current_time + timedelta(seconds=time_matrix[prev_node][node_idx])
+
+            # Wait until the time window opens (if we arrive early)
             waiting_time = 0
             service_start_time = arrival_time
-            
+
             if time_window_start and request.options.use_time_windows:
                 try:
-                    # Parse time window on the same date as arrival_time
                     window_hour, window_minute = map(int, time_window_start.split(":"))
-                    window_start = arrival_time.replace(hour=window_hour, minute=window_minute, second=0, microsecond=0)
-                    
-                    # If we arrive before window opens, there's waiting
+                    window_start = arrival_time.replace(
+                        hour=window_hour, minute=window_minute, second=0, microsecond=0
+                    )
                     if arrival_time < window_start:
-                        waiting_time = int((window_start - arrival_time).total_seconds() / 60)
+                        waiting_time = round((window_start - arrival_time).total_seconds() / 60)
                         service_start_time = window_start
                 except (ValueError, AttributeError):
                     pass  # Invalid time window format, skip waiting
-            
+
             # Departure time = when service finishes
             departure_time = service_start_time + timedelta(minutes=service_time)
 
@@ -333,14 +344,14 @@ class OptimizationService:
                     service_time_minutes=service_time,
                     waiting_time_minutes=waiting_time,
                     cumulative_distance_km=cum_distance / 1000,
-                    cumulative_time_minutes=int((cum_time / 60) + cumulative_service_minutes + waiting_time),
+                    cumulative_time_minutes=int((arrival_time - start_time).total_seconds() / 60),
                     lat=lat,
                     lng=lng,
                 )
             )
-            
-            # Add this stop's service time to cumulative
-            cumulative_service_minutes += service_time
+
+            current_time = departure_time
+            prev_node = node_idx
 
         return itinerary
 
