@@ -346,8 +346,12 @@ def solve_vrp(
                 latest_minutes = int((latest - start_time).total_seconds() / 60)
 
                 time_windows.append((earliest_minutes, latest_minutes))
-            except:
+            except ValueError:
                 # Invalid time window, use full range
+                logger.warning(
+                    f"Invalid time window for stop {stop.id!r} "
+                    f"({stop.time_window.earliest}-{stop.time_window.latest}); ignoring it"
+                )
                 time_windows.append((0, max_duration_minutes))
         else:
             time_windows.append((0, max_duration_minutes))
